@@ -15,12 +15,12 @@
 ---
 
 <!-- BANNER 1 -->
-![MARS Project Overview Banner](./media/assets/banner_1.png)
+![MARS Project Overview Banner](/media/assets/banner_1.png)
 
 ---
 
 <!-- BANNER 2 -->
-![MARS Project Objectives and Tools Banner](./media/assets/banner_2.png)
+![MARS Project Objectives and Tools Banner](/media/assets/banner_2.png)
 
 </div>
 
@@ -44,7 +44,7 @@ This project presents the design and implementation of an **intelligent navigati
 The project culminated in the construction of two functional robotic units, **KAMIL-01** and **KAMIL-02**, featuring a custom-built chassis and integrated sensor suites.
 
 <div align="center">
-![KAMIL-01 and KAMIL-02 Robots](./media/assets/robot_photo_real.png)
+![KAMIL-01 and KAMIL-02 Robots](/media/assets/robot_photo_real.png)
 <p><i>KAMIL-01 and KAMIL-02: The physical realization of the MARS project.</i></p>
 </div>
 
@@ -55,7 +55,7 @@ The project culminated in the construction of two functional robotic units, **KA
 The system follows a **Three-Tier Hierarchical Architecture**, ensuring a clear separation between high-level supervisory tasks, mid-level bridge processing, and low-level real-time control.
 
 <div align="center">
-![System Architecture](./media/assets/system_architecture.png)
+![System Architecture](/media/assets/system_architecture.png)
 </div>
 
 1.  **Supervisory Layer (Cloud/Server):** Handles the Fleet Management System (FMS), User Interface, and high-level task orchestration.
@@ -70,14 +70,14 @@ The system follows a **Three-Tier Hierarchical Architecture**, ensuring a clear 
 The robot chassis was designed with a modular approach, focusing on ease of maintenance and structural integrity. The design transitioned from 2D schematics to 3D SolidWorks models, followed by physical fabrication using 3D printing for structural components.
 
 <div align="center">
-![Mechanical Design Process](./media/assets/mechanical_design.png)
+![Mechanical Design Process](/media/assets/mechanical_design.png)
 </div>
 
 ### Differential Drive Assembly
 The locomotion system utilizes a differential drive mobile base with NEMA17 stepper motors and closed-loop encoder feedback for precise odometry.
 
 <div align="center">
-![Differential Drive Assembly](./media/assets/motor_wheel_assembly.png)
+![Differential Drive Assembly](/media/assets/motor_wheel_assembly.png)
 </div>
 
 ---
@@ -88,14 +88,14 @@ The locomotion system utilizes a differential drive mobile base with NEMA17 step
 Extensive system modeling was performed using MATLAB/Simulink to validate the kinematics and control logic before deployment.
 
 <div align="center">
-![System Modeling in Simulink](./media/assets/system_modeling.png)
+![System Modeling in Simulink](/media/assets/system_modeling.png)
 </div>
 
 ### Simulation Environment
 The system was rigorously tested in a **Gazebo Hospital World**, allowing for the evaluation of multi-robot scenarios, navigation stacks, and perception pipelines in a safe, reproducible environment.
 
 <div align="center">
-![Gazebo Simulation Environment](./media/assets/simulation_environment.png)
+![Gazebo Simulation Environment](/media/assets/simulation_environment.png)
 </div>
 
 ---
@@ -105,7 +105,7 @@ The system was rigorously tested in a **Gazebo Hospital World**, allowing for th
 The robots utilize **SLAM Toolbox** for real-time mapping and **AMCL** for precise localization. A key contribution is the **Multi-Robot Map Merging** capability, allowing multiple robots to build and share a unified map of the environment.
 
 <div align="center">
-![SLAM and Localization Details](./media/assets/slam_localization.png)
+![SLAM and Localization Details](/media/assets/slam_localization.png)
 </div>
 
 ---
@@ -115,7 +115,7 @@ The robots utilize **SLAM Toolbox** for real-time mapping and **AMCL** for preci
 The **RoboFleet Command Center** provides a centralized interface for monitoring robot availability, battery levels, and mission states, while allowing for manual task submission and emergency overrides.
 
 <div align="center">
-![Fleet Monitoring Dashboard](./media/assets/fleet_dashboard.png)
+![Fleet Monitoring Dashboard](/media/assets/fleet_dashboard.png)
 </div>
 
 ---
@@ -125,7 +125,7 @@ The **RoboFleet Command Center** provides a centralized interface for monitoring
 The system's operational flow is governed by an **Asynchronous State Machine (ASM)**, coordinating everything from user requests to low-level hardware triggers like RFID door opening.
 
 <div align="center">
-![System Operational Logic](./media/assets/operational_logic.png)
+![System Operational Logic](/media/assets/operational_logic.png)
 </div>
 
 ---
