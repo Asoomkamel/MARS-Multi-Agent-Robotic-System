@@ -110,6 +110,38 @@ The robots utilize **SLAM Toolbox** for real-time mapping and **AMCL** for preci
 
 ---
 
+## 🌳 Transformation Trees (TF)
+
+The MARS project utilizes a structured coordinate frame system to manage spatial relationships between the world, robots, and their individual sensors.
+
+### 1. Multi-Agent Configuration (With Namespacing)
+In a multi-robot setup, namespacing is critical to avoid frame ID collisions. Each robot operates within its own namespace (e.g., `robot1`, `robot2`), allowing the Fleet Management System to track multiple agents simultaneously in a global `world` frame.
+
+<div align="center">
+<img src="./media/screenshots/tf_tree_namespaced.png" alt="Namespaced TF Tree" width="100%"/>
+<p><i>Figure: TF Tree for a 3-robot heterogeneous fleet with namespacing.</i></p>
+</div>
+
+**Key Characteristics:**
+- **Global Root:** The `world` frame serves as the common origin for all agents.
+- **Namespaced Frames:** Each robot has its own `map`, `odom`, and `base_link` prefixed with its unique ID (e.g., `robot1/base_link`).
+- **Independent Odometry:** Each agent maintains its own localized odometry chain within its namespace.
+
+### 2. Single-Agent Configuration (Without Namespacing)
+For individual robot testing or single-agent deployments, a standard non-namespaced TF tree is used. This simplifies the configuration for standalone tasks.
+
+<div align="center">
+<img src="./media/screenshots/tf_tree_no_namespacing.png" alt="Non-Namespaced TF Tree" width="80%"/>
+<p><i>Figure: Standard TF Tree for a single MARS agent.</i></p>
+</div>
+
+**Key Characteristics:**
+- **Standard ROS Convention:** Follows the `map` → `odom` → `base_link` hierarchy.
+- **Direct Sensor Links:** Sensors like `lidar_link` and `imu_link` are attached directly to the `base_link`.
+- **Simplified Logic:** Ideal for initial calibration and single-robot SLAM validation.
+
+---
+
 ## 🎮 Fleet Monitoring & Control
 
 The **RoboFleet Command Center** provides a centralized interface for monitoring robot availability, battery levels, and mission states, while allowing for manual task submission and emergency overrides.
