@@ -11,6 +11,8 @@
 [![Nav2](https://img.shields.io/badge/Nav2-MPPI%20%2B%20Smac-informational?logo=ros)](https://nav2.org/)
 [![Micro-ROS](https://img.shields.io/badge/Micro--ROS-ESP32-green)](https://micro.ros.org/)
 [![CUDA](https://img.shields.io/badge/CUDA-GPU%20Accelerated-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32-orange?logo=platformio&logoColor=white)](https://platformio.org/)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-Bare--Metal-red?logo=espressif&logoColor=white)](https://idf.espressif.com/)
 
 **Bachelor's Graduation Project — Sana'a University, Faculty of Engineering**  
 *Electrical Engineering · Computer and Control Engineering · 2026*
@@ -39,11 +41,13 @@
 - [System Modeling & Simulation](#-system-modeling--simulation)
 - [Navigation Stack](#-navigation-stack)
 - [Semantic Perception Pipeline](#-semantic-perception-pipeline-yolo--costmap)
+- [YOLO Depth Fusion Node](#-yolo-depth-fusion-node-obstacle_detectorpy)
 - [Sensor Fusion — EKF](#-sensor-fusion--ekf)
 - [SLAM & Localization](#️-slam--localization)
 - [Transformation Trees (TF)](#-transformation-trees-tf)
 - [Fleet Management System](#-fleet-management-system)
 - [Fleet Monitoring Dashboard](#-fleet-monitoring--control)
+- [Embedded Control — ESP32 firmware](#-embedded-control--esp32-firmware)
 - [Docker Deployment](#-docker-deployment)
 - [ROS 2 Topic Reference](#-ros-2-topic-reference)
 - [Operational Logic](#-operational-logic)
@@ -64,6 +68,8 @@ This project presents the design and implementation of an **intelligent navigati
 - **Secure Access:** RFID-based door mechanism for authorized zone entry.
 - **Fleet Management:** Battery-aware task allocation, side-spot traffic de-confliction, and fault-tolerant task reallocation.
 - **Containerized Deployment:** Full system runs inside Docker for reproducible, dependency-free deployment.
+- **Dual ESP32 Embedded Firmware:** KAMIL-01 uses PlatformIO + Arduino framework with Micro-ROS; KAMIL-02 uses ESP-IDF bare-metal with explicit FreeRTOS dual-core partitioning for hard real-time motor control.
+- **YOLO Depth Fusion Node:** Standalone ROS 2 Python node synchronizing RGB and depth streams, back-projecting detections into 3D, and publishing PointCloud2 obstacles directly into the Nav2 VoxelLayer costmap.
 
 ---
 
@@ -258,6 +264,114 @@ RGB-D Camera
 
 ---
 
+## 🔬 YOLO Depth Fusion Node (`obstacle_detector.py`)
+
+The semantic perception layer is implemented as a standalone **ROS 2 Python node** (`YoloDepthFusion`) that bridges the AI detection pipeline directly into the Nav2 costmap system. This node is the concrete implementation of the pipeline described above.
+
+### Development Stack
+- **Language:** Python 3.10+
+- **Framework:** ROS 2 Humble (`rclpy`)
+- **AI Model:** Ultralytics YOLOv8 (`yolov8n.pt` by default, configurable)
+- **Computer Vision:** OpenCV (`cv2`) + NumPy
+- **ROS ↔ OpenCV bridge:** `cv_bridge`
+- **Point cloud generation:** `sensor_msgs_py.point_cloud2`
+- **Sensor synchronization:** `message_filters.ApproximateTimeSynchronizer`
+
+### Node Architecture
+
+```
+                ┌──────────────────────────────────────────────┐
+                │            YoloDepthFusion Node               │
+                │                                              │
+  kinect/rgb  ──┤─► ApproximateTimeSynchronizer                │
+  kinect/depth ─┤        (slop=0.6s, queue=10)                 │
+                │              │                               │
+                │              ▼                               │
+                │       image_callback()                       │
+                │              │                               │
+                │    ┌─────────┴──────────┐                   │
+                │    ▼                    ▼                    │
+                │  cv_bridge            cv_bridge              │
+                │  BGR8 image        depth passthrough         │
+                │    │                    │                    │
+                │    ▼                    │                    │
+                │  YOLO inference         │                    │
+                │  (filtered by          │                    │
+                │   target_objects)       │                    │
+                │    │                    │                    │
+                │    ▼                    ▼                    │
+                │  Bounding box ──► Depth pixel sample         │
+                │  centroid (u,v)    at (cx, cy)               │
+                │                        │                    │
+                │              3D back-projection              │
+                │         (Kinect intrinsics fx=fy=525)        │
+                │                        │                    │
+                │         ┌──────────────┼─────────────┐      │
+                │         ▼              ▼              ▼      │
+                │    PointCloud2      Marker        Debug img  │
+                └─────────┬──────────────┬──────────────┬─────┘
+                          │              │              │
+                          ▼              ▼              ▼
+               detected_object_pose  detected_     yolo_debug_
+               (→ VoxelLayer costmap) object_marker   image
+```
+
+### Key Technical Features
+
+**Approximate Time Synchronization**
+- Uses `message_filters.ApproximateTimeSynchronizer` with a 0.6-second slop tolerance to align RGB and depth frames that may arrive at slightly different timestamps — essential for real sensor hardware where streams are not perfectly synchronized.
+
+**Configurable ROS 2 Parameters**
+```python
+# All tunable at launch or via parameter server
+self.declare_parameter('yolo_model', 'yolov8n.pt')          # Swap model freely
+self.declare_parameter('target_objects', ['bottle', 'cup',
+                        'chair', 'person', 'keyboard'])      # Filter detections
+self.declare_parameter('confidence_threshold', 0.5)          # Min YOLO confidence
+```
+
+**Namespace-Aware Frame ID**
+The node dynamically resolves its ROS 2 namespace at runtime and constructs the correct TF frame:
+```python
+ns = self.get_namespace().strip('/')
+fixed_frame_id = f"{ns}/camera_depth_optical_frame" if ns else "camera_depth_optical_frame"
+```
+This ensures the published PointCloud2 messages carry the correct namespaced frame ID (e.g., `robot1/camera_depth_optical_frame`), making them valid for TF lookup in a multi-robot environment.
+
+**Depth Validity Filtering**
+Before projecting a detection into 3D, the node enforces strict depth validity gates:
+```python
+if not np.isnan(dist) and dist > 0.4 and dist < 8.0:
+```
+- Rejects NaN values (common near depth camera edges)
+- Enforces minimum 0.4 m (below the camera's reliable range)
+- Enforces maximum 8.0 m (beyond sensor accuracy)
+- Handles both `16UC1` (millimeter integer) and float depth encodings automatically
+
+**3D Back-Projection (Kinect Intrinsics)**
+```python
+fx, fy = 525.0, 525.0      # Kinect focal lengths (pixels)
+cx_opt, cy_opt = 319.5, 239.5   # Principal point (image center)
+
+x = (u - cx_opt) * z / fx   # X in camera frame (meters)
+y = (v - cy_opt) * z / fy   # Y in camera frame (meters)
+```
+The bounding box centroid `(u, v)` and sampled depth `z` are back-projected to `(x, y, z)` in the camera optical frame using the pinhole camera model.
+
+**Dual Output — Costmap + Visualization**
+
+| Publisher | Topic | Type | Consumer |
+|---|---|---|---|
+| `obj_pub` | `detected_object_pose` | `PointCloud2` | Nav2 VoxelLayer (`yolo_marking` source) |
+| `marker_pub` | `detected_object_marker` | `Marker` (SPHERE, r=0.2m) | RViz2 visualization |
+| `debug_img_pub` | `yolo_debug_image` | `Image` | Live bounding box preview |
+
+The PointCloud2 output feeds directly into the Nav2 local costmap's `yolo_marking` observation source (configured in `nav2_params_multi.yaml`), where it marks obstacle cells with 2-second persistence.
+
+**BEST_EFFORT QoS** is used for sensor topic subscriptions, matching the typical QoS profile of RGB-D camera drivers to prevent connection mismatches.
+
+---
+
 ## 📡 Sensor Fusion — EKF
 
 The `robot_localization` Extended Kalman Filter (EKF) runs at **20 Hz** in 2D mode, fusing two sensor streams for robust, drift-resistant localization:
@@ -445,7 +559,260 @@ python3 fleet_dashboard.py --ros2
 
 ---
 
-## 🐳 Docker Deployment
+## 🔌 Embedded Control — ESP32 Firmware
+
+The MARS project uses **two ESP32 microcontrollers**, each programmed using a different toolchain and methodology, reflecting two distinct embedded development approaches.
+
+---
+
+### Robot 1 — PlatformIO + Arduino Framework (`main.cpp`)
+
+**KAMIL-01**'s embedded firmware is developed using **PlatformIO** inside VS Code with the **Arduino framework**, providing a high-level hardware abstraction layer combined with production-grade stepper and encoder libraries.
+
+#### Toolchain & Development Environment
+
+| Tool | Role |
+|---|---|
+| **VS Code + PlatformIO extension** | IDE and build system |
+| **Arduino framework** | Hardware abstraction (GPIO, Serial, timers) |
+| **micro_ros_platformio** | Micro-ROS client library for Arduino/ESP32 |
+| **FastAccelStepper** | High-performance stepper control with hardware timer ISRs |
+| **ESP32Encoder** | Quadrature encoder reading via hardware pulse counter (PCNT) |
+
+#### Pin Mapping
+
+```
+Right Motor:  STEP → GPIO26  |  DIR → GPIO27
+Left Motor:   STEP → GPIO13  |  DIR → GPIO4
+Enable:       GPIO14  (shared, TB6560 driver)
+
+Left Encoder:  A → GPIO34  |  B → GPIO39  (input-only GPIOs)
+Right Encoder: A → GPIO35  |  B → GPIO36  (input-only GPIOs)
+```
+
+> GPIO 34–39 are input-only on the ESP32 and have no internal pull-up resistors — the encoder board must supply external pull-ups.
+
+#### Robot Physical Parameters
+
+```cpp
+WHEEL_DIAMETER_M = 0.066f    // 66 mm wheels
+WHEEL_BASE_M     = 0.160f    // 160 mm track width
+TICKS_PER_REV    = 1600.0f   // encoder ticks per full wheel revolution
+METERS_PER_TICK  = π × 0.066 / 1600 ≈ 0.0001297 m/tick
+```
+
+#### Micro-ROS Integration
+
+The firmware participates in the ROS 2 graph as a native node under the `robot1` namespace:
+
+```
+Node:      /robot1/diff_drive
+Publishes: /robot1/odom        (nav_msgs/Odometry)  @ 20 Hz
+Subscribes: /robot1/cmd_vel   (geometry_msgs/Twist)
+```
+
+The node waits for the Micro-ROS agent to be available before initializing (`rmw_uros_ping_agent` loop), ensuring clean startup without partial initialization. Frame IDs are assigned using `rosidl_runtime_c__String__assign()` for safe C-string memory management.
+
+#### Control Loop Architecture
+
+The firmware runs **two concurrent callbacks** managed by the `rclc_executor`:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  rclc_executor                      │
+│                                                     │
+│  cmd_vel subscriber ──► cmd_vel_cb()                │
+│       (ON_NEW_DATA)      │                          │
+│                          ▼                          │
+│                  Differential drive IK:             │
+│                  vL = v − ω·L/2                     │
+│                  vR = v + ω·L/2                     │
+│                  vel_to_hz() → FastAccelStepper     │
+│                                                     │
+│  odom_timer (20 Hz) ──► odom_timer_cb()             │
+│                          │                          │
+│                          ├─ Watchdog: stop if no    │
+│                          │  cmd_vel for > 500 ms    │
+│                          │                          │
+│                          ├─ Read encoder deltas      │
+│                          │  (ESP32Encoder PCNT)     │
+│                          │                          │
+│                          ├─ Dead-reckoning odometry │
+│                          │  (midpoint integration)  │
+│                          │                          │
+│                          └─ Publish odom msg        │
+└─────────────────────────────────────────────────────┘
+```
+
+#### Velocity → Stepper Frequency Conversion
+
+```cpp
+// Convert m/s → stepper Hz using physical calibration
+float ticks_per_s = v_mps / METERS_PER_TICK;
+int32_t hz = clamp(|ticks_per_s|, 0, 8000);  // MAX_HZ_LIMIT = 8000 Hz safety cap
+
+// Deadband: below 5 Hz treated as zero to avoid motor stutter
+if (hz < MIN_HZ_DEADBAND) stepperX->stopMove();
+```
+
+#### Odometry — Midpoint Integration
+
+The odometry computation uses the **midpoint Runge-Kutta integration** method for improved accuracy over simple Euler integration:
+
+```cpp
+float dC = 0.5f * (dL + dR);        // linear displacement (m)
+float dT = (dR - dL) / WHEEL_BASE;  // heading change (rad)
+float th_mid = theta + 0.5f * dT;   // midpoint heading
+
+x_pos += dC * cos(th_mid);
+y_pos += dC * sin(th_mid);
+theta += dT;
+
+// Quaternion from yaw (2D robot)
+odom.orientation.z = sin(theta / 2);
+odom.orientation.w = cos(theta / 2);
+```
+
+#### Safety Features
+- **500 ms watchdog timer** — motors halt automatically if no `cmd_vel` is received within the timeout (communication loss protection)
+- **8000 Hz stepper cap** (`MAX_HZ_LIMIT`) — hardware safety ceiling for the TB6560 driver
+- **5 Hz deadband** (`MIN_HZ_DEADBAND`) — prevents motor chatter at near-zero commands
+- **AutoEnable** on FastAccelStepper — motor driver enables automatically on movement and disables on stop, reducing heat and power draw
+
+---
+
+### Robot 2 — ESP-IDF + Bare-Metal Dual-Core Programming
+
+**KAMIL-02**'s embedded firmware is developed using the **ESP-IDF framework** directly in VS Code (via the Espressif IDF extension), bypassing the Arduino abstraction layer entirely. This approach gives full control over FreeRTOS task scheduling, hardware peripheral registers, and core affinity.
+
+#### Toolchain & Development Environment
+
+| Tool | Role |
+|---|---|
+| **VS Code + ESP-IDF extension** | IDE, build system (CMake), flash & monitor |
+| **ESP-IDF (Espressif IoT Development Framework)** | Native RTOS + hardware driver layer |
+| **FreeRTOS** | Real-time task scheduling with explicit core pinning |
+| **Micro-ROS ESP-IDF component** | Micro-ROS client for ESP-IDF projects |
+| **ESP-IDF peripheral drivers** | LEDC (PWM), PCNT (encoder), UART, ADC — all accessed directly |
+
+#### Dual-Core Task Partitioning
+
+The ESP32's two Xtensa LX6 cores are explicitly partitioned to isolate real-time hardware tasks from ROS 2 communication:
+
+```
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│         Core 0              │    │         Core 1              │
+│   (Real-Time Control)       │    │   (ROS 2 Communication)     │
+│                             │    │                             │
+│  ┌─────────────────────┐    │    │  ┌─────────────────────┐   │
+│  │  Motor Control Task │    │    │  │  Micro-ROS Spin Task│   │
+│  │  Priority: HIGH     │    │    │  │  Priority: NORMAL   │   │
+│  │  Period: 10 ms      │    │    │  │  (event-driven)     │   │
+│  │                     │    │    │  │                     │   │
+│  │  - LEDC PWM update  │    │    │  │  - UART transport   │   │
+│  │  - PID computation  │    │    │  │  - DDS-XRCE encode/ │   │
+│  │  - Watchdog check   │    │    │  │    decode           │   │
+│  └─────────────────────┘    │    │  │  - Publish /odom    │   │
+│                             │    │  │  - Receive /cmd_vel │   │
+│  ┌─────────────────────┐    │    │  └─────────────────────┘   │
+│  │  Encoder ISR Task   │    │    │                             │
+│  │  (PCNT interrupt)   │    │    │  ┌─────────────────────┐   │
+│  │  - Quadrature count │    │    │  │  Battery Monitor    │   │
+│  │  - Tick accumulation│    │    │  │  Priority: LOW      │   │
+│  └─────────────────────┘    │    │  │  - ADC sampling     │   │
+│                             │    │  │  - Voltage publish  │   │
+│  ┌─────────────────────┐    │    │  └─────────────────────┘   │
+│  │  Safety Monitor     │    │    │                             │
+│  │  - Over-current ISR │    │    └─────────────────────────────┘
+│  │  - Encoder fault    │    │
+│  └─────────────────────┘    │
+└─────────────────────────────┘
+```
+
+#### Bare-Metal Hardware Programming Features
+
+**LEDC (PWM) for Motor Control**
+Motor speed is controlled via direct ESP-IDF LEDC API calls, bypassing any Arduino layer:
+```c
+// Direct ESP-IDF LEDC configuration
+ledc_channel_config_t motor_ch = {
+    .gpio_num   = MOTOR_PIN,
+    .speed_mode = LEDC_HIGH_SPEED_MODE,
+    .channel    = LEDC_CHANNEL_0,
+    .timer_sel  = LEDC_TIMER_0,
+    .duty       = 0,
+};
+ledc_channel_config(&motor_ch);
+ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, duty_cycle);
+ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+```
+
+**PCNT (Pulse Counter) for Encoders**
+Quadrature encoder decoding uses ESP-IDF's hardware PCNT peripheral directly — no software interrupt polling:
+```c
+pcnt_config_t enc_cfg = {
+    .pulse_gpio_num = ENC_A_PIN,
+    .ctrl_gpio_num  = ENC_B_PIN,
+    .channel        = PCNT_CHANNEL_0,
+    .unit           = PCNT_UNIT_0,
+    .pos_mode       = PCNT_COUNT_INC,
+    .neg_mode       = PCNT_COUNT_DEC,
+    .lctrl_mode     = PCNT_MODE_REVERSE,
+    .hctrl_mode     = PCNT_MODE_KEEP,
+};
+pcnt_unit_config(&enc_cfg);
+```
+
+**FreeRTOS Task Creation with Core Pinning**
+```c
+// Pin motor control to Core 0 (real-time priority)
+xTaskCreatePinnedToCore(
+    motor_control_task,   // task function
+    "MotorCtrl",          // name
+    4096,                 // stack size
+    NULL,                 // parameters
+    configMAX_PRIORITIES - 1,  // highest priority
+    NULL,
+    0                     // Core 0
+);
+
+// Pin Micro-ROS communication to Core 1
+xTaskCreatePinnedToCore(
+    microros_spin_task,
+    "MicroROSSpin",
+    8192,
+    NULL,
+    5,
+    NULL,
+    1                     // Core 1
+);
+```
+
+**Inter-Core Communication via FreeRTOS Queues**
+Velocity commands received on Core 1 (Micro-ROS) are passed to Core 0 (motor control) via a thread-safe FreeRTOS queue, preventing data races without mutexes:
+```c
+// Core 1: receive cmd_vel, enqueue
+xQueueSend(cmd_vel_queue, &twist_msg, 0);
+
+// Core 0: dequeue and apply
+xQueueReceive(cmd_vel_queue, &local_twist, portMAX_DELAY);
+apply_motor_commands(local_twist);
+```
+
+#### Comparison: PlatformIO/Arduino vs. ESP-IDF Bare-Metal
+
+| Aspect | KAMIL-01 (PlatformIO/Arduino) | KAMIL-02 (ESP-IDF Bare-Metal) |
+|---|---|---|
+| **Abstraction level** | High (Arduino HAL) | Low (direct register/driver access) |
+| **Stepper control** | FastAccelStepper library | Custom LEDC PWM + timer ISR |
+| **Encoder reading** | ESP32Encoder library | PCNT hardware peripheral directly |
+| **RTOS scheduling** | Arduino loop + rclc_executor | FreeRTOS tasks with explicit core affinity |
+| **Core isolation** | Single execution context | Hard Core 0 / Core 1 partitioning |
+| **Build system** | PlatformIO (ini config) | ESP-IDF (CMake) |
+| **Development speed** | Faster iteration | More control, more setup |
+| **Real-time guarantee** | Soft (shared loop) | Hard (Core 0 dedicated, highest priority) |
+
+
 
 The entire MARS software stack runs inside a **Docker container**, ensuring a consistent, reproducible environment with no manual dependency management.
 
