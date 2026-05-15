@@ -108,11 +108,11 @@ The Bridge and Real-Time layers communicate via **DDS-XRCE (Micro-ROS)** over UA
 |---|---|
 | **Onboard Computer** | Raspberry Pi 5 (8 GB) |
 | **Embedded Controller** | ESP32 (240 MHz dual-core, 520 KB SRAM) |
-| **RGB-D Camera** | Intel RealSense D435i (depth range 0.3–3.0 m effective) |
+| **RGB-D Camera** | Microsoft KinectV1 (depth range 0.3–3.0 m effective) |
 | **IMU** | Integrated IMU via `/robot_name/imu/data` |
 | **Drive System** | Differential drive — NEMA17 stepper motors + quadrature encoders |
 | **Motor Driver** | DRV8833 (or equivalent) — PWM via ESP32 LEDC channels |
-| **Power System** | 3S LiPo 11.1V with dedicated 5V regulated supply for compute |
+| **Power System** | Mighty Max Battery ML12-12F2 - 12 Volt 12 AH, F2 Terminal, Rechargeable SLA AGM Battery, with dedicated 5V regulated supply for compute |
 | **Robot Footprint** | 44 cm × 38 cm rectangular chassis |
 | **Max Linear Velocity** | 0.5 m/s |
 | **Communication** | Wi-Fi 802.11n to fleet server; UART serial to ESP32 |
